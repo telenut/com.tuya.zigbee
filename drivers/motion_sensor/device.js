@@ -8,7 +8,6 @@ const BATTERY_UPDATE_INTERVAL = 1000 * 60 * 30;
 class motion_sensor extends ZigBeeDevice {
 
 	async onNodeInit({ zclNode }) {
-		this.printNode();
         this._powerConfiguration = zclNode.endpoints[1].clusters[CLUSTER.POWER_CONFIGURATION.NAME];
 
         const iasZone = zclNode.endpoints[1].clusters[CLUSTER.IAS_ZONE.NAME];
@@ -36,7 +35,7 @@ class motion_sensor extends ZigBeeDevice {
       ).catch(this.error);
       if (attrs) {
           const percent = attrs.batteryPercentageRemaining;
-          console.log('Set measure_battery: ', percent / 2);
+          this.log('Set measure_battery:', percent / 2);
           this.setCapabilityValue('measure_battery', percent / 2).catch(this.error);
       }
     }

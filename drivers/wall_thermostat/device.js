@@ -4,6 +4,7 @@ const TuyaSpecificCluster = require("../../lib/TuyaSpecificCluster");
 const TuyaOnOffCluster = require("../../lib/TuyaOnOffCluster");
 const TuyaSpecificClusterDevice = require("../../lib/TuyaSpecificClusterDevice");
 const {getDataValue} = require("./helpers");
+const UnmappedDpLogLimiter = require('./unmapped-dp-log');
 const {Cluster} = require("zigbee-clusters");
 
 Cluster.addCluster(TuyaOnOffCluster);
@@ -36,9 +37,12 @@ const THERMOSTAT_DATA_POINTS = {
  */
 class WallThermostatDevice extends TuyaSpecificClusterDevice {
     async onNodeInit({zclNode}) {
-        this.printNode();
 /*     debug(true);
     this.enableDebug(); */
+
+        // Preserve the first diagnostic for each unknown DP, but avoid flooding
+        // logs when a device repeats the same value at a high frequency.
+        this._unmappedDpLogLimiter = new UnmappedDpLogLimiter((...args) => this.log(...args));
 
         if (!this.hasCapability('thermostat_programming')) {
           await this.addCapability('thermostat_programming');
@@ -72,8 +76,20 @@ class WallThermostatDevice extends TuyaSpecificClusterDevice {
             this.log('Childlock set', childlock)
         });
 
-        zclNode.endpoints[1].clusters.tuya.on("reporting", value => this.processResponse(value));
-        zclNode.endpoints[1].clusters.tuya.on("response", value => this.processResponse(value));
+        zclNode.endpoints[1].clusters.tuya.on("reporting", async value => {
+      try {
+        await this.processResponse(value);
+      } catch (err) {
+        this.error('Failed to process Tuya reporting', err);
+      }
+    });
+        zclNode.endpoints[1].clusters.tuya.on("response", async value => {
+      try {
+        await this.processResponse(value);
+      } catch (err) {
+        this.error('Failed to process Tuya response', err);
+      }
+    });
 
         this.log("🚀 Wall Thermostat booted up!");
     }
@@ -141,7 +157,7 @@ class WallThermostatDevice extends TuyaSpecificClusterDevice {
                 break;
 
             default:
-                this.log('processReporting', dp, parsedValue)
+                this._unmappedDpLogLimiter.record(dp, parsedValue);
         }
     }
 }

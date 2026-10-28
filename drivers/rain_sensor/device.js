@@ -12,7 +12,6 @@ class RainSensor extends TuyaSpecificClusterDevice {
 
   async onNodeInit({ zclNode }) {
 
-    this.printNode();
 
     if (this.isFirstInit()) {
       await this.configureAttributeReporting([
@@ -37,9 +36,17 @@ class RainSensor extends TuyaSpecificClusterDevice {
       .on('attr.batteryPercentageRemaining', this.onBatteryPercentageRemainingAttributeReport.bind(this));
 
     // Attach event listeners to handle incoming data from Tuya clusters
-    zclNode.endpoints[1].clusters.tuya.on("reporting", this.processDatapoint.bind(this));
-    zclNode.endpoints[1].clusters.tuya.on("response", this.processDatapoint.bind(this));
-    zclNode.endpoints[1].clusters.tuya.on("reportingConfiguration", this.processDatapoint.bind(this));
+    const handleTuyaDatapoint = async value => {
+      try {
+        await this.processDatapoint(value);
+      } catch (err) {
+        this.error('Failed to process Tuya datapoint', err);
+      }
+    };
+
+    zclNode.endpoints[1].clusters.tuya.on('reporting', handleTuyaDatapoint);
+    zclNode.endpoints[1].clusters.tuya.on('response', handleTuyaDatapoint);
+    zclNode.endpoints[1].clusters.tuya.on('reportingConfiguration', handleTuyaDatapoint);
   }
 
   onIASZoneStatusChangeNotification({ zoneStatus, extendedStatus, zoneId, delay, }) {
@@ -81,10 +88,13 @@ class RainSensor extends TuyaSpecificClusterDevice {
         this.setCapabilityValue('alarm_cleaning', parsedValue !== 0).catch(this.error);
         break;
 
-      case V1_RAIN_SENSOR_DATA_POINTS.rain_intensity:
-        this.log('Received rain intensity:', parsedValue);
-        this.setCapabilityValue('measure_voltage.rain', parsedValue / 1000).catch(this.error);
+      case V1_RAIN_SENSOR_DATA_POINTS.rain_intensity: {
+        const isRaining = parsedValue > 100;
+        this.log('Received rain intensity:', parsedValue, 'raining:', isRaining);
+        await this.setCapabilityValue('measure_voltage.rain', parsedValue / 1000);
+        await this.setCapabilityValue('alarm_water', isRaining);
         break;
+      }
 
       default:
         this.log('Unhandled DP:', dp, 'with value:', parsedValue);

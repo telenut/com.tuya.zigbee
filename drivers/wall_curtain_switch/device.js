@@ -24,7 +24,6 @@ class wallcurtainswitch extends ZigBeeDevice {
     async onNodeInit({ zclNode }) {
         await super.onNodeInit({ zclNode });
 
-        this.printNode();
 
         // code borrowed from here most recent version of zigbee driver to handle lift percentage + invert correctly
         // remove once the package was updated
@@ -100,33 +99,33 @@ class wallcurtainswitch extends ZigBeeDevice {
 
         const attrs = await this.zclNode.endpoints[1].clusters.windowCovering
             .readAttributes(["calibrationTime", "motorReversal"])
-            .catch((err) =>
-                this.error("Error when reading settings from device", err)
-            );
+            .catch((err) => {
+                this.error("Error when reading settings from device", err);
+                return {};
+            });
 
         if (attrs.calibrationTime) {
             await this.setSettings({ movetime: attrs.calibrationTime / 10 });
         }
 
         if (attrs.motorReversal) {
-            this.setSettings({ reverse: attrs.motorReversal === 'On' })
+            await this.setSettings({ reverse: attrs.motorReversal === 'On' })
         }
 
-        const moveOpen = this.homey.flow.getActionCard("wall_move_open");
-        moveOpen.registerRunListener(async (args, state) => {
-            await this.zclNode.endpoints[1].clusters.windowCovering[UP_OPEN]();
-        });
-
-        const moveClose = this.homey.flow.getActionCard("wall_move_close");
-        moveClose.registerRunListener(async (args, state) => {
-            await this.zclNode.endpoints[1].clusters.windowCovering[DOWN_CLOSE]();
-        });
     }
 
     // When upgrading to node-zigbee-clusters v.2.0.0 this must be adressed:
     // v2.0.0
     // Changed Cluster.readAttributes signature, attributes must now be specified as an array of strings.
     // zclNode.endpoints[1].clusters.windowCovering.readAttributes(['motorReversal', 'ANY OTHER IF NEEDED']);
+
+    async moveOpen() {
+        await this.zclNode.endpoints[1].clusters.windowCovering[UP_OPEN]();
+    }
+
+    async moveClose() {
+        await this.zclNode.endpoints[1].clusters.windowCovering[DOWN_CLOSE]();
+    }
 
     async onSettings({ oldSettings, newSettings, changedKeys }) {
         try {

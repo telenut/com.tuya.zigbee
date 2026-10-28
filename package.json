@@ -1,12 +1,15 @@
 {
   "name": "com.tuya.zigbee",
-  "version": "0.2.76",
+  "version": "0.4.0",
   "description": "Adds support for Tuya Zigbee devices to Homey",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "lint": "eslint .",
-    "start": "node app.js"
+    "run": "homey app run",
+    "validate": "homey app validate --level publish",
+    "test": "node --test test/*.test.js",
+    "check": "npm test && npm run validate",
+    "update:supported-devices": "node scripts/generate-supported-devices.js",
+    "check:supported-devices": "node scripts/generate-supported-devices.js --check"
   },
   "keywords": [
     "Tuya",
@@ -21,7 +24,7 @@
   "bugs": {
     "url": "https://github.com/JohanBendz/com.tuya.zigbee/issues"
   },
-  "homepage": "https://bortbytt.se/2022/02/03/tuya-zigbee/",
+  "homepage": "https://github.com/JohanBendz/com.tuya.zigbee#readme",
   "engines": {
     "node": ">=12"
   },
@@ -33,7 +36,7 @@
     "url": "https://www.paypal.me/johanbendz"
   },
   "dependencies": {
-    "homey-zigbeedriver": "^2.1.4",
-    "zigbee-clusters": "^2.4.1"
+    "homey-zigbeedriver": "2.1.4",
+    "zigbee-clusters": "2.4.1"
   }
 }

@@ -3,6 +3,7 @@
 const { Cluster, BoundCluster } = require('zigbee-clusters');
 const TuyaSpecificCluster = require('../../lib/TuyaSpecificCluster');
 const TuyaSpecificClusterDevice = require('../../lib/TuyaSpecificClusterDevice');
+const { isDeviceUnreachableError } = require('../../lib/util');
 
 Cluster.addCluster(TuyaSpecificCluster);
 
@@ -178,9 +179,9 @@ class SirenTimeBoundCluster extends BoundCluster {
 class sensortemphumidsensor extends TuyaSpecificClusterDevice {
 
   async onNodeInit({ zclNode }) {
-    this.printNode();
 
     this._timeBoundCluster = null;
+    this._alarmTrigger = this.homey.flow.getDeviceTriggerCard('alarm_siren');
 
     await this.ensureCapability('measure_temperature');
     await this.ensureCapability('measure_humidity');
@@ -256,74 +257,72 @@ class sensortemphumidsensor extends TuyaSpecificClusterDevice {
   }
 
   async bootstrap() {
-    await this.bootstrapBasicRead();
-    await this.forceCelsiusMode();
-    await this.sendMcuVersionRequest();
-    await this.queryAll();
+    const steps = [
+      ['basic read', () => this.bootstrapBasicRead()],
+      ['set Celsius mode', () => this.forceCelsiusMode()],
+      ['MCU version request', () => this.sendMcuVersionRequest()],
+      ['data query', () => this.queryAll()],
+    ];
+
+    for (const [label, run] of steps) {
+      try {
+        await run();
+      } catch (error) {
+        if (isDeviceUnreachableError(error)) {
+          this.log(`Device unreachable during startup (${label}); skipping remaining bootstrap commands`);
+          return;
+        }
+        this.error(`Bootstrap ${label} failed`, error);
+      }
+    }
   }
 
   async bootstrapBasicRead() {
-    try {
-      const basicCluster = this.zclNode?.endpoints?.[1]?.clusters?.basic;
-      if (!basicCluster) return;
+    const basicCluster = this.zclNode?.endpoints?.[1]?.clusters?.basic;
+    if (!basicCluster) return;
 
-      this.log('Bootstrap read: basic cluster');
+    this.log('Bootstrap read: basic cluster');
 
-      const result = await basicCluster.readAttributes([
-        'manufacturerName',
-        'zclVersion',
-        'appVersion',
-        'modelId',
-        'powerSource',
-        'attributeReportingStatus',
-      ]);
+    const result = await basicCluster.readAttributes([
+      'manufacturerName',
+      'zclVersion',
+      'appVersion',
+      'modelId',
+      'powerSource',
+      'attributeReportingStatus',
+    ]);
 
-      this.log('Bootstrap read result:', result);
-    } catch (error) {
-      this.error('Bootstrap read failed', error);
-    }
+    this.log('Bootstrap read result:', result);
   }
 
   async forceCelsiusMode() {
-    try {
-      this.log('Setting Tuya temperature unit DP 0x70 => Celsius');
-      await this.writeBool(dataPoints.TEMP_UNIT, true);
-    } catch (error) {
-      this.error('Failed to set Celsius mode', error);
-    }
+    this.log('Setting Tuya temperature unit DP 0x70 => Celsius');
+    await this.writeBool(dataPoints.TEMP_UNIT, true);
   }
 
   async sendMcuVersionRequest() {
-    try {
-      const tuyaCluster = this.zclNode?.endpoints?.[1]?.clusters?.tuya;
-      if (!tuyaCluster || typeof tuyaCluster.mcuVersionRequest !== 'function') {
-        this.log('Tuya mcuVersionRequest not available');
-        return;
-      }
-
-      const payload = Buffer.from([0x00, this.transactionID & 0xff]);
-      this.transactionID += 1;
-
-      this.log('Sending Tuya mcuVersionRequest (0x10), payload=', payload);
-      await tuyaCluster.mcuVersionRequest({ payload });
-    } catch (error) {
-      this.error('Failed to send Tuya mcuVersionRequest', error);
+    const tuyaCluster = this.zclNode?.endpoints?.[1]?.clusters?.tuya;
+    if (!tuyaCluster || typeof tuyaCluster.mcuVersionRequest !== 'function') {
+      this.log('Tuya mcuVersionRequest not available');
+      return;
     }
+
+    const payload = Buffer.from([0x00, this.transactionID & 0xff]);
+    this.transactionID += 1;
+
+    this.log('Sending Tuya mcuVersionRequest (0x10), payload=', payload);
+    await tuyaCluster.mcuVersionRequest({ payload });
   }
 
   async queryAll() {
-    try {
-      const tuyaCluster = this.zclNode?.endpoints?.[1]?.clusters?.tuya;
-      if (!tuyaCluster || typeof tuyaCluster.dataQuery !== 'function') {
-        this.log('Tuya dataQuery not available');
-        return;
-      }
-
-      this.log('Sending Tuya dataQuery (0x03)');
-      await tuyaCluster.dataQuery({});
-    } catch (error) {
-      this.error('Failed to send Tuya dataQuery', error);
+    const tuyaCluster = this.zclNode?.endpoints?.[1]?.clusters?.tuya;
+    if (!tuyaCluster || typeof tuyaCluster.dataQuery !== 'function') {
+      this.log('Tuya dataQuery not available');
+      return;
     }
+
+    this.log('Sending Tuya dataQuery (0x03)');
+    await tuyaCluster.dataQuery({});
   }
 
   async onTuyaTimeSync(data) {
@@ -382,10 +381,19 @@ class sensortemphumidsensor extends TuyaSpecificClusterDevice {
     );
 
     switch (dp) {
-      case dataPoints.ALARM:
-        await this.safeSetCapabilityValue('onoff', !!measuredValue);
-        await this.safeSetCapabilityValue('alarm_siren', !!measuredValue);
+      case dataPoints.ALARM: {
+        const isAlarm = !!measuredValue;
+        const wasAlarm = this.getCapabilityValue('alarm_siren') === true;
+
+        await this.safeSetCapabilityValue('onoff', isAlarm);
+        await this.safeSetCapabilityValue('alarm_siren', isAlarm);
+
+        if (isAlarm && !wasAlarm) {
+          this._alarmTrigger.trigger(this, {}, {})
+            .catch(error => this.error('Failed to trigger alarm_siren Flow card', error));
+        }
         break;
+      }
 
       case dataPoints.TEMPERATURE:
         this.reportTemperatureCapacity(measuredValue);
@@ -527,6 +535,10 @@ class sensortemphumidsensor extends TuyaSpecificClusterDevice {
           break;
       }
     }
+  }
+
+  async setAlarmState(value) {
+    await this.writeBool(dataPoints.ALARM, value);
   }
 
   async sendAlarmVolume(volume) {

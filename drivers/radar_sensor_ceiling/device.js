@@ -61,7 +61,17 @@ const getDataValue = (dpValue) => {
 class radarSensorCeiling extends TuyaSpecificClusterDevice {
   async onNodeInit({zclNode}) {
 
-    zclNode.endpoints[1].clusters.tuya.on("response", value => this.updatePosition(value));
+    if (!this.hasCapability('target_distance')) {
+      await this.addCapability('target_distance');
+    }
+
+    zclNode.endpoints[1].clusters.tuya.on("response", async value => {
+      try {
+        await this.updatePosition(value);
+      } catch (err) {
+        this.error('Failed to process Tuya response', err);
+      }
+    });
   }
 
   async updatePosition(data) {
@@ -81,7 +91,7 @@ class radarSensorCeiling extends TuyaSpecificClusterDevice {
         break;
       case dataPoints.tshpsTargetDistance:
         if (new Date().getSeconds() % 10 === 0) {
-          this.setCapabilityValue('target_distance', value/100);
+          this.setCapabilityValue('target_distance', value/100).catch(this.error).catch(this.error);
         }
 
         break;
@@ -97,34 +107,34 @@ class radarSensorCeiling extends TuyaSpecificClusterDevice {
 
   async onSettings({newSettings, changedKeys}) {
     if (changedKeys.includes('radar_sensitivity')) {
-      this.writeData32(dataPoints.tshpscSensitivity, newSettings['radar_sensitivity'])
+      await this.writeData32(dataPoints.tshpscSensitivity, newSettings['radar_sensitivity'])
     }
 
     if (changedKeys.includes('minimum_range')) {
-      this.writeData32(dataPoints.tshpsMinimumRange, newSettings['minimum_range']*100)
+      await this.writeData32(dataPoints.tshpsMinimumRange, newSettings['minimum_range']*100)
     }
 
     if (changedKeys.includes('maximum_range')) {
-      this.writeData32(dataPoints.tshpsMaximumRange, newSettings['maximum_range']*100)
+      await this.writeData32(dataPoints.tshpsMaximumRange, newSettings['maximum_range']*100)
     }
 
     if (changedKeys.includes('detection_delay')) {
-      this.writeData32(dataPoints.tshpsDetectionDelay, newSettings['detection_delay'])
+      await this.writeData32(dataPoints.tshpsDetectionDelay, newSettings['detection_delay'])
     }
 
     if (changedKeys.includes('fading_time')) {
-      this.writeData32(dataPoints.tshpsFadingTime, newSettings['fading_time'])
+      await this.writeData32(dataPoints.tshpsFadingTime, newSettings['fading_time'])
     }
   }
 
   onIlluminanceMeasuredAttributeReport(measuredValue) {
     this.log('measure_luminance | Luminance - measuredValue (lux):', measuredValue);
-    this.setCapabilityValue('measure_luminance', measuredValue);
+    this.setCapabilityValue('measure_luminance', measuredValue).catch(this.error);
   }
 
   onIASZoneStatusChangeNotification({zoneStatus, extendedStatus, zoneId, delay,}) {
     this.log('IASZoneStatusChangeNotification received:', zoneStatus, extendedStatus, zoneId, delay);
-    this.setCapabilityValue('alarm_motion', zoneStatus.alarm1);
+    this.setCapabilityValue('alarm_motion', zoneStatus.alarm1).catch(this.error);
   }
 
 }

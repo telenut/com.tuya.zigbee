@@ -58,17 +58,29 @@ const getDataValue = (dpValue) => {
 class soilsensor2 extends TuyaSpecificClusterDevice {
 
   async onNodeInit({ zclNode }) {
+    try {
+      await zclNode.endpoints[1].clusters.basic.readAttributes([
+        'manufacturerName',
+        'zclVersion',
+        'appVersion',
+        'modelId',
+        'powerSource',
+        'attributeReportingStatus',
+      ]);
+    } catch (err) {
+      this.error('Error when reading device attributes ', err);
+    }
 
-    this.printNode();
-/*     debug(true);
-    this.enableDebug(); */
+    const handleDatapoint = async value => {
+      try {
+        await this.updateData(value);
+      } catch (err) {
+        this.error('Failed to process Tuya soil-sensor datapoint', err);
+      }
+    };
 
-    zclNode.endpoints[1].clusters.tuya.on("response", value => this.updateData(value));
-
-    await zclNode.endpoints[1].clusters.basic.readAttributes(['manufacturerName', 'zclVersion', 'appVersion', 'modelId', 'powerSource', 'attributeReportingStatus'])
-    .catch(err => {
-        this.error('Error when reading device attributes ', err);
-    });
+    zclNode.endpoints[1].clusters.tuya.on('response', handleDatapoint);
+    zclNode.endpoints[1].clusters.tuya.on('reporting', handleDatapoint);
   }
 
   async updateData(data) {

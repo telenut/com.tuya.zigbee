@@ -17,6 +17,14 @@ const dataPoints = {
   tshpsIlluminanceLux: 104,
 }
 
+const alternateDpManufacturers = new Set(['_TZE204_gkfbdvyx']);
+const tenthSecondTimingManufacturers = new Set(['_TZE204_qasjif9e', '_TZE204_ztqnh5cg']);
+const zyM10024GV2Manufacturers = new Set(['_TZE204_7gclukjs']);
+const alternateDataPoints = {
+  tshpsFadingTime: 105,
+  tshpsIlluminanceLux: 103,
+};
+
 const dataTypes = {
   raw: 0, // [ bytes ]
   bool: 1, // [0/1]
@@ -59,8 +67,47 @@ const getDataValue = (dpValue) => {
 }
 
 class radarSensor extends TuyaSpecificClusterDevice {
+  dp = dataPoints;
+
   async onNodeInit({zclNode}) {
-    zclNode.endpoints[1].clusters.tuya.on("response", value => this.updatePosition(value));
+    let manufacturerName;
+    try {
+      ({manufacturerName} = await zclNode.endpoints[1].clusters.basic.readAttributes(['manufacturerName']));
+    } catch (err) {
+      this.error('Failed to read manufacturerName attribute:', err);
+    }
+
+    this.usesAlternateDataPoints = alternateDpManufacturers.has(manufacturerName);
+    this.usesTenthSecondTiming = tenthSecondTimingManufacturers.has(manufacturerName);
+    this.isZyM10024GV2 = zyM10024GV2Manufacturers.has(manufacturerName);
+    this.dp = this.usesAlternateDataPoints ? {...dataPoints, ...alternateDataPoints} : dataPoints;
+
+    if (this.isZyM10024GV2) {
+      this.dp = {
+        ...dataPoints,
+        tshpsPresenceState: 104,
+        tshpsState: 1,
+        tshpsIlluminanceLux: 103,
+        tshpsTargetDistance: 9,
+        tshpsFadingTime: 105,
+      };
+    }
+
+    this.log(
+      `manufacturer: ${manufacturerName}, using ${this.isZyM10024GV2 ? 'ZY-M100-24GV2' : this.usesAlternateDataPoints ? 'alternate' : 'default'} datapoints`,
+      `timing scale: ${this.usesTenthSecondTiming ? '0.1s' : '1s'}`
+    );
+
+    const handleDatapoint = async value => {
+      try {
+        await this.updatePosition(value);
+      } catch (err) {
+        this.error('Failed to process Tuya radar datapoint', err);
+      }
+    };
+
+    zclNode.endpoints[1].clusters.tuya.on("response", handleDatapoint);
+    zclNode.endpoints[1].clusters.tuya.on("reporting", handleDatapoint);
   }
 
   async updatePosition(data) {
@@ -69,23 +116,34 @@ class radarSensor extends TuyaSpecificClusterDevice {
     const distanceUpdateInterval = this.getSetting('distance_update_interval') ?? 10;
 
     switch (dp) {
-      case dataPoints.tshpsPresenceState:
+      case this.dp.tshpsPresenceState:
         this.log("presence state: "+ value)
-        this.setCapabilityValue('alarm_motion', Boolean(value))
+        await this.setCapabilityValue('alarm_motion', Boolean(value))
+        break;
+
+      case this.dp.tshpsState:
+        if (this.isZyM10024GV2) {
+          this.log('radar state:', value);
+          await this.setCapabilityValue('alarm_motion', value === 1 || value === 2);
+          break;
+        }
+        this.log('dp value', dp, value);
         break;
       case dataPoints.tshpscSensitivity:
         this.log("sensitivity state: "+ value)
         break;
-      case dataPoints.tshpsIlluminanceLux:
+      case this.dp.tshpsIlluminanceLux:
         this.log("lux value: "+ value)
         this.onIlluminanceMeasuredAttributeReport(value)
         break;
-      case dataPoints.tshpsTargetDistance:
+      case this.dp.tshpsTargetDistance: {
         if (new Date().getSeconds() % distanceUpdateInterval === 0) {
-          this.setCapabilityValue('target_distance', value/100);
+          const divisor = this.isZyM10024GV2 ? 10 : 100;
+          this.setCapabilityValue('target_distance', value / divisor).catch(this.error);
         }
 
         break;
+      }
 
       default:
         this.log('dp value', dp, value)
@@ -98,34 +156,43 @@ class radarSensor extends TuyaSpecificClusterDevice {
 
   async onSettings({newSettings, changedKeys}) {
     if (changedKeys.includes('radar_sensitivity')) {
-      this.writeData32(dataPoints.tshpscSensitivity, newSettings['radar_sensitivity'])
+      await this.writeData32(dataPoints.tshpscSensitivity, newSettings['radar_sensitivity'])
     }
 
     if (changedKeys.includes('minimum_range')) {
-      this.writeData32(dataPoints.tshpsMinimumRange, newSettings['minimum_range']*100)
+      await this.writeData32(dataPoints.tshpsMinimumRange, newSettings['minimum_range']*100)
     }
 
     if (changedKeys.includes('maximum_range')) {
-      this.writeData32(dataPoints.tshpsMaximumRange, newSettings['maximum_range']*100)
+      await this.writeData32(dataPoints.tshpsMaximumRange, newSettings['maximum_range']*100)
     }
 
     if (changedKeys.includes('detection_delay')) {
-      this.writeData32(dataPoints.tshpsDetectionDelay, newSettings['detection_delay'])
+      if (this.usesAlternateDataPoints || this.isZyM10024GV2) {
+        throw new Error('Detection delay is not supported on this device model.');
+      }
+      const detectionDelay = this.usesTenthSecondTiming
+        ? newSettings['detection_delay'] * 10
+        : newSettings['detection_delay'];
+      await this.writeData32(dataPoints.tshpsDetectionDelay, detectionDelay)
     }
 
     if (changedKeys.includes('fading_time')) {
-      this.writeData32(dataPoints.tshpsFadingTime, newSettings['fading_time'])
+      const fadingTime = this.usesTenthSecondTiming
+        ? newSettings['fading_time'] * 10
+        : newSettings['fading_time'];
+      await this.writeData32(this.dp.tshpsFadingTime, fadingTime)
     }
   }
 
   onIlluminanceMeasuredAttributeReport(measuredValue) {
     this.log('measure_luminance | Luminance - measuredValue (lux):', measuredValue);
-    this.setCapabilityValue('measure_luminance', measuredValue);
+    this.setCapabilityValue('measure_luminance', measuredValue).catch(this.error);
   }
 
   onIASZoneStatusChangeNotification({zoneStatus, extendedStatus, zoneId, delay,}) {
     this.log('IASZoneStatusChangeNotification received:', zoneStatus, extendedStatus, zoneId, delay);
-    this.setCapabilityValue('alarm_motion', zoneStatus.alarm1);
+    this.setCapabilityValue('alarm_motion', zoneStatus.alarm1).catch(this.error);
   }
 
 }

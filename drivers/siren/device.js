@@ -84,63 +84,46 @@ class siren extends TuyaSpecificClusterDevice {
 
 	async onNodeInit({ zclNode }) {
 
-		this.printNode();
 
-		this.addCapability("measure_battery");
+		if (!this.hasCapability('measure_battery')) {
+			await this.addCapability('measure_battery');
+		}
+
+		this._alarmTrigger = this.homey.flow.getDeviceTriggerCard('siren_alarm');
 
 		this.registerCapabilityListener('onoff', async (value) => {
 			this.log('onoff: ', value);
 			await this.writeBool(dataPoints.TUYA_DP_ALARM, value);
 		});
 
-		zclNode.endpoints[1].clusters.tuya.on("response", value => this.processResponse(value));
-		zclNode.endpoints[1].clusters.tuya.on("reporting", value => this.processReporting(value));
-		zclNode.endpoints[1].clusters.tuya.on("datapoint", value => this.processDatapoint(value));
+		zclNode.endpoints[1].clusters.tuya.on("response", async value => {
+      try {
+        await this.processResponse(value);
+      } catch (err) {
+        this.error('Failed to process Tuya response', err);
+      }
+    });
+		zclNode.endpoints[1].clusters.tuya.on("reporting", async value => {
+      try {
+        await this.processReporting(value);
+      } catch (err) {
+        this.error('Failed to process Tuya reporting', err);
+      }
+    });
+		zclNode.endpoints[1].clusters.tuya.on("datapoint", async value => {
+      try {
+        await this.processDatapoint(value);
+      } catch (err) {
+        this.error('Failed to process Tuya datapoint', err);
+      }
+    });
 
 
-		this.log('Register action card listeners for node: ', this);
-		const actionAlarmState = this.homey.flow.getActionCard('siren_alarm_state');
-		actionAlarmState.registerRunListener(async (args, state) => {
-			const alarmStateRequested = args.siren_alarm_state !== 'off/disable';
-
-			try {
-			this.log(
-				'FlowCardAction set alarm state to:',
-				args.siren_alarm_state,
-				`(dp value: ${alarmStateRequested})`
-			);
-
-			await this.writeBool(dataPoints.TUYA_DP_ALARM, alarmStateRequested);
-			return true;
-			} catch (error) {
-			this.error('Failed to set alarm state', error);
-			return false;
-			}
-		});
-	
-		const actionSirenVolume = this.homey.flow.getActionCard('siren_volume_setting');
-		actionSirenVolume.registerRunListener(async (args, state) => {
-		  this.log('FlowCardAction Set Alarm volume to: ', args.siren_volume_setting);
-		  args.device.sendAlarmVolume(args.siren_volume_setting);
-		});
-	
-		const actionAlarmDuration = this.homey.flow.getActionCard('siren_alarm_duration');
-		actionAlarmDuration.registerRunListener(async (args, state) => {
-		  this.log('FlowCardAction Set Alarm Duration to: ', args.duration);
-		  args.device.sendAlarmDuration(args.duration);
-		});
-	
-		const actionAlarmTune = this.homey.flow.getActionCard('siren_alarm_tune');
-		actionAlarmTune.registerRunListener(async (args, state) => {
-		  this.log('FlowCardAction Set Alarm Tune to: ', args.siren_alarm_tune);
-		  args.device.sendAlarmTune(args.siren_alarm_tune);
-		});
 	  }
 	
 	  async processResponse(data) {
 		this.log('########### Response: ', data);
-		const parsedValue = getDataValue(data);
-		this.log('Parsed value ', parsedValue);
+		await this.processReporting(data);
 	  }
 	
 	  async processReporting(data) {
@@ -148,25 +131,33 @@ class siren extends TuyaSpecificClusterDevice {
 		const parsedValue = getDataValue(data);
 		this.log('DP ', data.dp, ' with parsed value ', parsedValue);
 		switch (data.dp) {
-		  case dataPoints.TUYA_DP_ALARM:
-			this.log('Alarm state update: ', parsedValue);
-			this.setCapabilityValue('onoff', parsedValue).catch(this.error);
+		  case dataPoints.TUYA_DP_ALARM: {
+			const isAlarm = !!parsedValue;
+			const wasAlarm = this.getCapabilityValue('onoff') === true;
+			this.log('Alarm state update: ', isAlarm);
+			await this.setCapabilityValue('onoff', isAlarm).catch(this.error);
+
+			if (isAlarm && !wasAlarm) {
+			  this._alarmTrigger.trigger(this, {}, {})
+			    .catch(err => this.error('Failed to trigger siren_alarm Flow card', err));
+			}
 			break;
-		  case dataPoints.TUYA_DP_VOLUME: // (05) volume [ENUM] 0:high 1:mid 2:low
+		  }
+		  case dataPoints.TUYA_DP_VOLUME: // (05) volume [ENUM] 0:low 1:medium 2:high
 			this.log('Volume updated: ', volumeMapping.get(Number(parsedValue)), ' (', parsedValue, ')');
-			this.setSettings({
+			await this.setSettings({
 			  alarmvolume: parsedValue?.toString(),
 			});
 			break;
 		  case dataPoints.TUYA_DP_DURATION: // (07) duration [VALUE] in seconds
 			this.log('Duration updated:', parsedValue, 's');
-			this.setSettings({
+			await this.setSettings({
 			  alarmsoundtime: parsedValue,
 			});
 			break;
 		  case dataPoints.TUYA_DP_MELODY: // (21) melody [enum] 0..17
 			this.log('Melody updated: ', melodiesMapping.get(parsedValue), '(', parsedValue, ')');
-			this.setSettings({
+			await this.setSettings({
 			  alarmtune: parsedValue?.toString(),
 			});
 			break;
@@ -181,8 +172,7 @@ class siren extends TuyaSpecificClusterDevice {
 	
 	  async processDatapoint(data) {
 		this.log('########### Datapoint: ', data);
-		const parsedValue = getDataValue(data);
-		this.log('Parsed value ', parsedValue);
+		await this.processReporting(data);
 	  }
 	
 	  onDeleted() {
@@ -190,40 +180,44 @@ class siren extends TuyaSpecificClusterDevice {
 	  }
 	
 	  async onSettings({ oldSettings, newSettings, changedKeys }) {
-		changedKeys.forEach((updatedSetting) => {
+		for (const updatedSetting of changedKeys) {
 		  this.log('########### Updated setting: ', updatedSetting, ' => ', newSettings[updatedSetting]);
 		  switch (updatedSetting) {
 			case 'alarmvolume':
-			  this.sendAlarmVolume(newSettings[updatedSetting]);
+			  await this.sendAlarmVolume(newSettings[updatedSetting]);
 			  break;
 			case 'alarmsoundtime':
-			  this.sendAlarmDuration(newSettings[updatedSetting]);
+			  await this.sendAlarmDuration(newSettings[updatedSetting]);
 			  break;
 			case 'alarmtune':
-			  this.sendAlarmTune(newSettings[updatedSetting]);
+			  await this.sendAlarmTune(newSettings[updatedSetting]);
 			  break;
 			default:
 			  this.log('ERROR: Unknown setting: ', updatedSetting);
 			  break;
 		  }
-		});
+		}
 	  }
 	
-	  sendAlarmVolume(volume) { // (05) volume [ENUM] 0:high 1:mid 2:low
+	  async setAlarmState(value) {
+		await this.writeBool(dataPoints.TUYA_DP_ALARM, value);
+	  }
+	
+	  async sendAlarmVolume(volume) { // (05) volume [ENUM] 0:low 1:medium 2:high
 		const volumeName = volumeMapping.get(Number(volume));
 		this.log('Sending alarm volume: ', volumeName, ' (', volume, ')');
-		this.writeEnum(dataPoints.TUYA_DP_VOLUME, volume);
+		await this.writeEnum(dataPoints.TUYA_DP_VOLUME, volume);
 	  }
 	
-	  sendAlarmDuration(duration) {
+	  async sendAlarmDuration(duration) {
 		this.log('Sending alarm duration: ', duration, 's');
-		this.writeData32(dataPoints.TUYA_DP_DURATION, duration);
+		await this.writeData32(dataPoints.TUYA_DP_DURATION, duration);
 	  }
 	
-	  sendAlarmTune(tune) {
+	  async sendAlarmTune(tune) {
 		const tuneNr = Number(tune);
 		this.log('Sending alarm tune: ', melodiesMapping.get(tuneNr), ' (', tuneNr, ')');
-		this.writeEnum(dataPoints.TUYA_DP_MELODY, tuneNr);
+		await this.writeEnum(dataPoints.TUYA_DP_MELODY, tuneNr);
 	  }
 	
 	}

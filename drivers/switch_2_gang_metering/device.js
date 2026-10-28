@@ -10,23 +10,24 @@ class switch_2_gang_metering extends ZigBeeDevice {
 
   async onNodeInit({zclNode}) {
 
-    this.printNode();
-
-    this.meteringOffset = this.getSetting('metering_offset');
-    this.measureOffset = this.getSetting('measure_offset') * 100;
-    this.minReportPower= this.getSetting('minReportPower') * 1000;
-    this.minReportCurrent = this.getSetting('minReportCurrent') * 1000;
-    this.minReportVoltage = this.getSetting('minReportVoltage') * 1000;
-
-    if (!this.hasCapability('measure_current')) {
-      await this.addCapability('measure_current').catch(this.error);;
-    }
-
-    if (!this.hasCapability('measure_voltage')) {
-      await this.addCapability('measure_voltage').catch(this.error);;
-    }
 
     const { subDeviceId } = this.getData();
+
+    if (!this.isSubDevice()) {
+      this.meteringOffset = this.getSetting('metering_offset');
+      this.measureOffset = this.getSetting('measure_offset') * 100;
+      this.minReportPower = this.getSetting('minReportPower') * 1000;
+      this.minReportCurrent = this.getSetting('minReportCurrent') * 1000;
+      this.minReportVoltage = this.getSetting('minReportVoltage') * 1000;
+
+      if (!this.hasCapability('measure_current')) {
+        await this.addCapability('measure_current').catch(this.error);
+      }
+
+      if (!this.hasCapability('measure_voltage')) {
+        await this.addCapability('measure_voltage').catch(this.error);
+      }
+    }
     this.log("Device data: ", subDeviceId);
 
     this.registerCapability('onoff', CLUSTER.ON_OFF, {
@@ -91,26 +92,23 @@ class switch_2_gang_metering extends ZigBeeDevice {
           pollInterval: this.minReportVoltage
         }
       });
-    
-      this.registerCapability('resetEnergyMeter', 'resetEnergyMeter');
 
     }
 
   }
 
   async resetEnergyMeter() {
-    try {
-      // Endpoint: 1 Cluster: 0x00 Command: 0 Payload:
-      await this.zclNode.endpoints[1].clusters.basic.doCommand('0');
-      this.log("Energy meter reset successfully");
-    } catch (err) {
-      this.error("Failed to reset energy meter", err);
-    }
+    const error = new Error(
+      'Energy meter reset is not implemented safely for this device.'
+    );
+    this.error(error.message);
+    throw error;
   }
 
-  onDeleted(){
-  this.log("2 Gang Switch, channel ", subDeviceId, " removed")
-	}
+  onDeleted() {
+    const { subDeviceId } = this.getData();
+    this.log("2 Gang Switch, channel ", subDeviceId, " removed");
+  }
 
 }
 

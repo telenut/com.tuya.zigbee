@@ -8,7 +8,6 @@ class relay_board_4_channel extends ZigBeeDevice {
 
     async onNodeInit({zclNode}) {
 
-        this.printNode();
 
         const { subDeviceId } = this.getData();
         this.log("Device data: ", subDeviceId);
@@ -40,6 +39,7 @@ class relay_board_4_channel extends ZigBeeDevice {
     }
 
     onDeleted(){
+		const { subDeviceId } = this.getData();
 		this.log("4 Channel Relay Board, channel ", subDeviceId, " removed")
 	}
 

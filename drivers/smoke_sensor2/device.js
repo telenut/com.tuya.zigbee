@@ -56,9 +56,17 @@ const getDataValue = (dpValue) => {
 class smoke_sensor2 extends TuyaSpecificClusterDevice {
   async onNodeInit({zclNode}) {
 
-    this.printNode();
 
-    zclNode.endpoints[1].clusters.tuya.on("response", value => this.updatePosition(value));
+    const handleDatapoint = async value => {
+      try {
+        await this.updatePosition(value);
+      } catch (err) {
+        this.error('Failed to process Tuya smoke datapoint', err);
+      }
+    };
+
+    zclNode.endpoints[1].clusters.tuya.on("response", handleDatapoint);
+    zclNode.endpoints[1].clusters.tuya.on("reporting", handleDatapoint);
   }
 
   async updatePosition(data) {
@@ -72,29 +80,36 @@ class smoke_sensor2 extends TuyaSpecificClusterDevice {
         break;
 
       case dataPoints.tsTamperAlert:
-        this.setCapabilityValue('alarm_tamper', Boolean(value)).catch(this.error);
-        break;
-
-      case dataPoints.tsBatteryState:
-
-        switch (value) { 
-          case 0:
-            var batteryPerc = 20;
-            var batAlarm = value === 0 ? true : false;
-            this.log("measure_battery | powerConfiguration - batteryPercentageRemaining (%): ", batteryPerc);
-            this.setCapabilityValue('alarm_battery', batAlarm).catch(this.error);
-          case 1:
-            var batteryPerc = 50;
-            this.log("measure_battery | powerConfiguration - batteryPercentageRemaining (%): ", batteryPerc);
-          case 2:
-            var batteryPerc = 90;
-            this.log("measure_battery | powerConfiguration - batteryPercentageRemaining (%): ", batteryPerc);
-        break;
+        if (this.hasCapability('alarm_tamper')) {
+          this.setCapabilityValue('alarm_tamper', Boolean(value)).catch(this.error);
         }
-        
-        this.setCapabilityValue('measure_battery', batteryPerc).catch(this.error);
-
         break;
+
+      case dataPoints.tsBatteryState: {
+        const batteryPercentages = { 0: 20, 1: 50, 2: 90 };
+        const batteryPerc = batteryPercentages[value];
+
+        if (batteryPerc === undefined) {
+          this.log('Unknown smoke sensor battery state:', value);
+          break;
+        }
+
+        this.log(
+          'measure_battery | battery state:',
+          value,
+          '=>',
+          batteryPerc,
+          '%'
+        );
+
+        if (this.hasCapability('alarm_battery')) {
+          this.setCapabilityValue('alarm_battery', value === 0).catch(this.error);
+        }
+        if (this.hasCapability('measure_battery')) {
+          this.setCapabilityValue('measure_battery', batteryPerc).catch(this.error);
+        }
+        break;
+      }
       
       default:
       this.log('dp value', dp, value)
@@ -107,7 +122,7 @@ class smoke_sensor2 extends TuyaSpecificClusterDevice {
 
   onIASZoneStatusChangeNotification({zoneStatus, extendedStatus, zoneId, delay,}) {
     this.log('IASZoneStatusChangeNotification received:', zoneStatus, extendedStatus, zoneId, delay);
-    this.setCapabilityValue('alarm_smoke', zoneStatus.alarm1);
+    this.setCapabilityValue('alarm_smoke', zoneStatus.alarm1).catch(this.error);
   }
 
 }

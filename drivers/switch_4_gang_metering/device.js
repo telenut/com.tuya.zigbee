@@ -10,8 +10,7 @@ class switch_4_gang_metering extends ZigBeeDevice {
 
   async onNodeInit({zclNode}) {
 
-    this.printNode();
-    console.log(zclNode.endpoints);
+    this.log('Zigbee endpoints:', zclNode.endpoints);
 
     const { subDeviceId } = this.getData();
     this.log('Device data: ', subDeviceId);
@@ -40,7 +39,8 @@ class switch_4_gang_metering extends ZigBeeDevice {
         this.registerCapabilities(zclNode, { endpoint });
       } else {
         // Register only onoff for the endpoint
-        this.registerCapability('onoff', CLUSTER.ON_OFF, { endpoint }, {
+        this.registerCapability('onoff', CLUSTER.ON_OFF, {
+          endpoint,
           getOpts: {
             getOnStart: true
           }
@@ -61,15 +61,8 @@ class switch_4_gang_metering extends ZigBeeDevice {
       this.log('Configured instant reporting for onOff');
     } catch (error) {
       // If reporting fails, log the error and set up fallback polling
-      this.error('Failed to configure onOff reporting, setting up fallback polling', error);
+      this.error('Failed to configure onOff reporting, continuing without configured reporting', error);
       
-      // Directly set the fallback polling interval without re-registering the capability
-      this.setCapabilityOptions('onoff', {
-        getOpts: {
-          getOnStart: true,
-          pollInterval: 60000, // Poll every 60 seconds as a fallback
-        },
-      });
     }
 
   }
@@ -78,7 +71,8 @@ class switch_4_gang_metering extends ZigBeeDevice {
     const endpoint = options.endpoint;
 
     // onOff capability
-    this.registerCapability('onoff', CLUSTER.ON_OFF, options, {
+    this.registerCapability('onoff', CLUSTER.ON_OFF, {
+      ...options,
       getOpts: {
         getOnStart: true
       }
@@ -87,7 +81,8 @@ class switch_4_gang_metering extends ZigBeeDevice {
     // Only for endpoint 1 (main device), register additional capabilities
     if (endpoint === 1) {
       // meter_power capability
-      this.registerCapability('meter_power', CLUSTER.METERING, options, {
+      this.registerCapability('meter_power', CLUSTER.METERING, {
+        ...options,
         reportParser: value => (value * this.meteringOffset) / 100.0,
         getParser: value => (value * this.meteringOffset) / 100.0,
         getOpts: {
@@ -97,7 +92,8 @@ class switch_4_gang_metering extends ZigBeeDevice {
       });
 
       // measure_power capability
-      this.registerCapability('measure_power', CLUSTER.ELECTRICAL_MEASUREMENT, options, {
+      this.registerCapability('measure_power', CLUSTER.ELECTRICAL_MEASUREMENT, {
+        ...options,
         reportParser: value => (value * this.measureOffset) / 100,
         getOpts: {
           getOnStart: true,
@@ -106,7 +102,8 @@ class switch_4_gang_metering extends ZigBeeDevice {
       });
 
       // measure_current capability
-      this.registerCapability('measure_current', CLUSTER.ELECTRICAL_MEASUREMENT, options, {
+      this.registerCapability('measure_current', CLUSTER.ELECTRICAL_MEASUREMENT, {
+        ...options,
         reportParser: value => value / 1000,
         getOpts: {
           getOnStart: true,
@@ -115,7 +112,8 @@ class switch_4_gang_metering extends ZigBeeDevice {
       });
 
       // measure_voltage capability
-      this.registerCapability('measure_voltage', CLUSTER.ELECTRICAL_MEASUREMENT, options, {
+      this.registerCapability('measure_voltage', CLUSTER.ELECTRICAL_MEASUREMENT, {
+        ...options,
         reportParser: value => value,
         getOpts: {
           getOnStart: true,

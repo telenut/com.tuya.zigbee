@@ -1,6 +1,6 @@
 'use strict';
 
-const { Cluster, debug } = require('zigbee-clusters');
+const { Cluster } = require('zigbee-clusters');
 const TuyaSpecificCluster = require('../../lib/TuyaSpecificCluster');
 const TuyaSpecificClusterDevice = require('../../lib/TuyaSpecificClusterDevice');
 
@@ -51,17 +51,36 @@ class temphumidsensor5 extends TuyaSpecificClusterDevice {
 
 	async onNodeInit({ zclNode }) {
 
-		this.printNode();
 
-		this.addCapability("measure_temperature");
-		this.addCapability("measure_humidity");
-		this.addCapability("measure_battery");
+		for (const capabilityId of ['measure_temperature', 'measure_humidity', 'measure_battery']) {
+			if (!this.hasCapability(capabilityId)) {
+				await this.addCapability(capabilityId);
+			}
+		}
 
-		zclNode.endpoints[1].clusters.tuya.on("response", value => this.processResponse(value));
+		zclNode.endpoints[1].clusters.tuya.on("response", async value => {
+      try {
+        await this.processResponse(value);
+      } catch (err) {
+        this.error('Failed to process Tuya response', err);
+      }
+    });
 
-		zclNode.endpoints[1].clusters.tuya.on("reporting", value => this.processReporting(value));
+		zclNode.endpoints[1].clusters.tuya.on("reporting", async value => {
+      try {
+        await this.processReporting(value);
+      } catch (err) {
+        this.error('Failed to process Tuya reporting', err);
+      }
+    });
 
-		zclNode.endpoints[1].clusters.tuya.on("datapoint", value => this.processDatapoint(value));
+		zclNode.endpoints[1].clusters.tuya.on("datapoint", value => {
+      try {
+        this.processDatapoint(value);
+      } catch (err) {
+        this.error('Failed to process Tuya datapoint', err);
+      }
+    });
 
 	}
 
@@ -71,7 +90,6 @@ class temphumidsensor5 extends TuyaSpecificClusterDevice {
 		this.log('received data: ', data, ' dp: ', dp, ' measuredValue: ', measuredValue);
 		switch (dp) {
 			case 1:
-				this.warn
 				this.log('Temperature is ', (measuredValue / 10.0), ' C (', measuredValue, ')');
 				this.reportTemperatureCapacity(measuredValue);
 				break;

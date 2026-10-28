@@ -1,0 +1,27 @@
+# Repository / development files
+.git/
+.github/
+.vscode/
+.idea/
+test/
+scripts/
+
+# Maintainer and project documentation
+docs/
+README.md
+SUPPORTED_DEVICES.md
+MAINTAINING.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+
+# Local/editor files
+.gitignore
+.editorconfig
+env.json
+.env
+.env.*
+*.log
+
+# Test / coverage output
+coverage/
+.nyc_output/

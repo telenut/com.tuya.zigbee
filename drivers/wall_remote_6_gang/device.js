@@ -6,23 +6,13 @@ const { ZigBeeDevice } = require('homey-zigbeedriver');
 class wall_remote_6_gang extends ZigBeeDevice {
 
     async onNodeInit({zclNode}) {
-
-      this.printNode();
-
       const node = await this.homey.zigbee.getNode(this);
       node.handleFrame = (endpointId, clusterId, frame, meta) => {
         if (clusterId === 6) {
-           this.log("endpointId:", endpointId,", clusterId:", clusterId,", frame:", frame, ", meta:", meta);
-           this.log("Frame JSON data:", frame.toJSON());
            frame = frame.toJSON();
            this.buttonCommandParser(endpointId, frame);
         }
       };
-
-      this._buttonPressedTriggerDevice = this.homey.flow.getDeviceTriggerCard('wall_remote_6_gang_buttons')
-      .registerRunListener(async (args, state) => {
-        return (null, args.action === state.action);
-      });
     
     }
 
@@ -39,8 +29,8 @@ class wall_remote_6_gang extends ZigBeeDevice {
     
       // Debounce logic for oneClick
       if (!this.doubleClickReceived && action === 'oneClick') {
-        this.clickTimeout = setTimeout(() => {
-          this._buttonPressedTriggerDevice.trigger(this, {}, { action: `${button}-${action}` })
+        this.clickTimeout = this.homey.setTimeout(() => {
+          this.driver.buttonTrigger.trigger(this, {}, { action: `${button}-${action}` })
             .then(() => this.log(`Triggered 6 Gang Wall Remote, action=${button}-${action}`))
             .catch(err => this.error('Error triggering 6 Gang Wall Remote', err));
         }, 300); // Adjust debounce time as needed
@@ -48,20 +38,20 @@ class wall_remote_6_gang extends ZigBeeDevice {
     
       // Handle twoClicks immediately, cancel pending oneClick
       if (action === 'twoClicks') {
-        clearTimeout(this.clickTimeout);
+        this.homey.clearTimeout(this.clickTimeout);
         this.doubleClickReceived = true;
-        this._buttonPressedTriggerDevice.trigger(this, {}, { action: `${button}-${action}` })
+        this.driver.buttonTrigger.trigger(this, {}, { action: `${button}-${action}` })
           .then(() => this.log(`Triggered 6 Gang Wall Remote, action=${button}-${action}`))
           .catch(err => this.error('Error triggering 6 Gang Wall Remote', err));
     
-        setTimeout(() => {
+        this.homey.setTimeout(() => {
           this.doubleClickReceived = false;
         }, 500); // Adjust time as needed
       }
     
       // Handle long press
       if (action === 'longPress') {
-        this._buttonPressedTriggerDevice.trigger(this, {}, { action: `${button}-${action}` })
+        this.driver.buttonTrigger.trigger(this, {}, { action: `${button}-${action}` })
           .then(() => this.log(`Triggered 6 Gang Wall Remote, action=${button}-${action}`))
           .catch(err => this.error('Error triggering 6 Gang Wall Remote', err));
       }

@@ -8,12 +8,9 @@ class smart_remote_4b extends ZigBeeDevice {
     async onNodeInit({zclNode}) {
 
       var debounce = 0;
-      this.printNode();
-  
       const node = await this.homey.zigbee.getNode(this);
       node.handleFrame = (endpointId, clusterId, frame, meta) => {
         if (clusterId === 1281) {
-//          this.log("Frame JSON data:", frame.toJSON());
           debounce = debounce+1;
           if (debounce===1){
             this.buttonCommandParser(frame);
@@ -24,22 +21,17 @@ class smart_remote_4b extends ZigBeeDevice {
         }
       };
 
-      this._buttonPressedTriggerDevice = this.homey.flow.getDeviceTriggerCard('smart_remote_4_buttons')
-      .registerRunListener(async (args, state) => {
-        return (null, args.action === state.action);
-      });
-
     }
 
     buttonCommandParser(frame) {
       if (frame[2]===2){
         var button = 'leftUp';
-        return this._buttonPressedTriggerDevice.trigger(this, {}, { action: `${button}` })
+        return this.driver.buttonTrigger.trigger(this, {}, { action: `${button}` })
         .then(() => this.log(`Triggered 4 button Smart Remote, action=${button}`))
         .catch(err => this.error('Error triggering 4 button Smart Remote', err));
       } else {
         var button = frame[3] === 0 ? 'rightDown' : frame[3] === 1 ? 'leftDown' : 'rightUp';
-        return this._buttonPressedTriggerDevice.trigger(this, {}, { action: `${button}` })
+        return this.driver.buttonTrigger.trigger(this, {}, { action: `${button}` })
         .then(() => this.log(`Triggered 4 button Smart Remote, action=${button}`))
         .catch(err => this.error('Error triggering 4 button Smart Remote', err));
       }
